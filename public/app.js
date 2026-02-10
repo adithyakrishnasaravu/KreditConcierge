@@ -127,7 +127,8 @@ function selectedCardLast4() {
 }
 
 const DEMO_CARDS = [
-  { issuer: "American Express", nickname: "Amex Platinum", cardLast4: "1008", fraudLocked: false }
+  { issuer: "American Express", nickname: "Travel Platinum", cardLast4: "3005", fraudLocked: true },
+  { issuer: "Chase", nickname: "Sapphire Reserve", cardLast4: "8891", fraudLocked: false }
 ];
 
 async function connectCards() {
@@ -372,11 +373,13 @@ async function solve() {
       callToNumber: $("callToNumber").value.trim()
     };
 
+    // Always include transcript as fallback for STT failures
+    const transcript = $("transcript").value.trim();
+    if (transcript) payload.transcript = transcript;
+
     if (state.recordedAudio) {
       payload.audioBase64 = state.recordedAudio.audioBase64;
       payload.mimeType = state.recordedAudio.mimeType;
-    } else {
-      payload.transcript = $("transcript").value.trim();
     }
 
     setIssueProgress(issueId, 30, "Voice captured");
