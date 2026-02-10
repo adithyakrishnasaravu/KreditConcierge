@@ -3,13 +3,22 @@ import path from "path";
 
 const DATA_PATH = path.resolve(process.cwd(), "data/customers.json");
 
+let memoryCache = null;
+
 async function readData() {
+  if (memoryCache) return memoryCache;
   const raw = await fs.readFile(DATA_PATH, "utf8");
-  return JSON.parse(raw);
+  memoryCache = JSON.parse(raw);
+  return memoryCache;
 }
 
 async function writeData(data) {
-  await fs.writeFile(DATA_PATH, JSON.stringify(data, null, 2));
+  memoryCache = data;
+  try {
+    await fs.writeFile(DATA_PATH, JSON.stringify(data, null, 2));
+  } catch {
+    // Read-only filesystem (Vercel) — keep in memory only
+  }
 }
 
 export async function getCustomerById(customerId) {
