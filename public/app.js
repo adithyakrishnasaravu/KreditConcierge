@@ -15,7 +15,7 @@ function headers() {
 }
 
 function baseUrl() {
-  return ($("baseUrl").value || "http://localhost:3011").replace(/\/$/, "");
+  return ($("baseUrl").value || window.location.origin).replace(/\/$/, "");
 }
 
 function setLoading(btn, loading, label) {
