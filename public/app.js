@@ -58,6 +58,18 @@ async function apiPost(path, body) {
   return json.data;
 }
 
+async function apiGet(path) {
+  const res = await fetch(`${baseUrl()}${path}`, {
+    headers: headers()
+  });
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    throw new Error(json.error || json?.data?.error || `Request failed (${res.status})`);
+  }
+  return json.data;
+}
+
 function toBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -204,10 +216,21 @@ async function startRecording() {
         mimeType: blob.type || "audio/webm"
       };
       const statusEl = $("recordStatus");
-      statusEl.textContent = `Recorded (${state.recordedAudio.mimeType})`;
+      statusEl.textContent = `Recorded — transcribing...`;
       statusEl.classList.remove("recording");
-      // Show delete button
       $("deleteRecording").style.display = "inline-flex";
+
+      // Auto-transcribe
+      try {
+        const result = await apiPost("/api/voice/transcribe", {
+          audioBase64: state.recordedAudio.audioBase64,
+          mimeType: state.recordedAudio.mimeType
+        });
+        $("transcript").value = result.text || result.transcript || "";
+        statusEl.textContent = "Transcription complete";
+      } catch (err) {
+        statusEl.textContent = `Transcription failed: ${err.message}`;
+      }
     };
 
     mediaRecorder.start();
@@ -350,11 +373,46 @@ function setIssueProgress(id, progress, status, extra) {
   renderIssues();
 }
 
+// --- Call Status Polling ---
+function pollCallStatus(callId, issueId) {
+  const STATUS_MAP = {
+    queued:        { progress: 50, text: "Call queued" },
+    ringing:       { progress: 60, text: "Ringing..." },
+    "in-progress": { progress: 75, text: "Call in progress" },
+    forwarding:    { progress: 75, text: "Forwarding call" },
+    ended:         { progress: 100, text: "Resolved" }
+  };
+
+  const interval = setInterval(async () => {
+    try {
+      const data = await apiGet(`/api/agent/call-status/${callId}`);
+      const status = data?.status || "queued";
+      const mapped = STATUS_MAP[status] || { progress: 50, text: `Call: ${status}` };
+
+      setIssueProgress(issueId, mapped.progress, mapped.text, { callId });
+
+      if (status === "ended") {
+        clearInterval(interval);
+      }
+    } catch {
+      // If polling fails, stop silently — the issue stays at its last known state
+      clearInterval(interval);
+    }
+  }, 3000);
+}
+
 // --- Solve (Agent Flow) ---
 async function solve() {
   const btn = $("solveBtn");
   const panel = $("resultPanel");
   panel.style.display = "none";
+
+  const transcript = $("transcript").value.trim();
+  if (!transcript) {
+    renderResult(null, "Please record audio or type a transcript before solving.");
+    return;
+  }
+
   setLoading(btn, true, "Solve");
 
   const issueId = `iss_${Date.now().toString().slice(-6)}`;
@@ -370,22 +428,12 @@ async function solve() {
     const payload = {
       customerId: $("customerId").value.trim() || "cust_001",
       cardLast4: selectedCardLast4(),
-      callToNumber: $("callToNumber").value.trim()
+      callToNumber: $("callToNumber").value.trim(),
+      transcript
     };
 
-    // Always include transcript as fallback for STT failures
-    const transcript = $("transcript").value.trim();
-    if (transcript) payload.transcript = transcript;
-
-    if (state.recordedAudio) {
-      payload.audioBase64 = state.recordedAudio.audioBase64;
-      payload.mimeType = state.recordedAudio.mimeType;
-    }
-
-    setIssueProgress(issueId, 30, "Voice captured");
+    setIssueProgress(issueId, 30, "Processing issue...");
     const data = await apiPost("/api/agent/test-call", payload);
-
-    setIssueProgress(issueId, 70, "Agent handled CC call");
 
     const resolution = data?.handled?.resolution || {};
     const summaryText = data?.summary?.summary || "Resolution generated";
@@ -393,18 +441,30 @@ async function solve() {
     const ticketId = resolution.ticketId || resolution.caseId || resolution.disputeId || null;
     const callId = data?.call?.id || null;
 
-    setIssueProgress(issueId, 100, "Resolved", {
-      summary: summaryText,
-      issueType,
-      ticketId,
-      callId
-    });
-
-    renderResult(data, null);
+    if (callId) {
+      // Call was placed — show "In Progress" and start polling
+      setIssueProgress(issueId, 40, "Call placed — waiting for status", {
+        summary: summaryText,
+        issueType,
+        ticketId,
+        callId
+      });
+      renderResult(data, null);
+      setLoading(btn, false, "Solve");
+      pollCallStatus(callId, issueId);
+    } else {
+      // No phone call — resolve immediately
+      setIssueProgress(issueId, 100, "Resolved", {
+        summary: summaryText,
+        issueType,
+        ticketId
+      });
+      renderResult(data, null);
+      setLoading(btn, false, "Solve");
+    }
   } catch (err) {
     setIssueProgress(issueId, 100, `Failed: ${err.message}`);
     renderResult(null, err.message);
-  } finally {
     setLoading(btn, false, "Solve");
   }
 }

@@ -14,30 +14,43 @@ function maybeAuthHeaders() {
 }
 
 export async function transcribeAudio({ audioBase64, mimeType = "audio/wav" }) {
-  const apiKey = requireApiKey();
-  const model = process.env.HATHORA_STT_MODEL || "deepgram:nova-2";
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) throw new Error("Missing OPENAI_API_KEY");
 
-  const res = await fetch(`${baseUrl}/speech-to-text`, {
+  console.log("[STT] Starting transcription via OpenAI Whisper...");
+  console.log("[STT]   MIME type:", mimeType);
+  console.log("[STT]   Audio size:", audioBase64 ? `${(audioBase64.length * 0.75 / 1024).toFixed(1)} KB` : "MISSING");
+
+  if (!audioBase64) {
+    throw new Error("audioBase64 is empty — no audio data received");
+  }
+
+  // Convert base64 to a Blob for multipart upload
+  const audioBuffer = Buffer.from(audioBase64, "base64");
+  const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("mp4") ? "mp4" : "wav";
+  const audioBlob = new Blob([audioBuffer], { type: mimeType });
+
+  const form = new FormData();
+  form.append("file", audioBlob, `recording.${ext}`);
+  form.append("model", "whisper-1");
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
+      Authorization: `Bearer ${openaiKey}`
     },
-    body: JSON.stringify({
-      model,
-      audio: {
-        content: audioBase64,
-        mimeType
-      }
-    })
+    body: form
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Hathora STT failed (${res.status}): ${text}`);
+    console.error(`[STT] FAILED (${res.status}):`, text);
+    throw new Error(`OpenAI Whisper failed (${res.status}): ${text}`);
   }
 
-  return res.json();
+  const json = await res.json();
+  console.log("[STT] Success. Transcript:", json.text?.slice(0, 200));
+  return json;
 }
 
 export async function synthesizeSpeech({ text, voice = "alloy" }) {

@@ -67,6 +67,12 @@ export async function createCall({
   if (phoneNumberId) body.phoneNumberId = phoneNumberId;
   if (assistantOverrides) body.assistantOverrides = assistantOverrides;
 
+  console.log("[Vapi] Creating call...");
+  console.log("[Vapi]   assistantId:", assistantId);
+  console.log("[Vapi]   customerNumber:", customerNumber);
+  console.log("[Vapi]   phoneNumberId:", phoneNumberId || "NOT SET");
+  console.log("[Vapi]   firstMessage:", assistantOverrides?.firstMessage?.slice(0, 100) || "none");
+
   const res = await fetch(`${VAPI_BASE_URL}/call`, {
     method: "POST",
     headers: {
@@ -78,7 +84,27 @@ export async function createCall({
 
   if (!res.ok) {
     const responseText = await res.text();
+    console.error(`[Vapi] FAILED to create call (${res.status}):`, responseText);
     throw new Error(`Failed to create call (${res.status}): ${responseText}`);
+  }
+
+  const json = await res.json();
+  console.log("[Vapi] Call created successfully. ID:", json.id);
+  return json;
+}
+
+export async function getCallStatus(callId) {
+  const apiKey = getVapiApiKey();
+  const res = await fetch(`${VAPI_BASE_URL}/call/${callId}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`
+    }
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to get call status (${res.status}): ${body}`);
   }
 
   return res.json();

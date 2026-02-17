@@ -20,7 +20,7 @@ import {
   voiceIntake
 } from "./lib/resolution-flow.js";
 import { getCustomerById } from "./lib/store.js";
-import { createCall } from "./lib/vapi.js";
+import { createCall, getCallStatus } from "./lib/vapi.js";
 import { handleVapiWebhook } from "./lib/vapi-webhook.js";
 
 const app = express();
@@ -48,6 +48,7 @@ function asyncRoute(handler) {
       const data = await handler(req);
       return res.json({ ok: true, data });
     } catch (error) {
+      console.error("[asyncRoute] ERROR:", error instanceof Error ? error.stack : error);
       return res.status(400).json({
         ok: false,
         error: error instanceof Error ? error.message : "Unknown error"
@@ -132,9 +133,23 @@ app.post(
 app.post(
   "/api/agent/test-call",
   asyncRoute(async (req) => {
+    console.log("\n========== /api/agent/test-call ==========");
+    console.log("[test-call] Body keys:", Object.keys(req.body));
+    console.log("[test-call] customerId:", req.body.customerId);
+    console.log("[test-call] cardLast4:", req.body.cardLast4);
+    console.log("[test-call] callToNumber:", req.body.callToNumber || "NOT PROVIDED");
+    console.log("[test-call] transcript:", req.body.transcript ? `"${req.body.transcript.slice(0, 80)}"` : "NOT PROVIDED");
+    console.log("[test-call] audioBase64:", req.body.audioBase64 ? `YES (${(req.body.audioBase64.length * 0.75 / 1024).toFixed(1)} KB)` : "NOT PROVIDED");
+    console.log("[test-call] mimeType:", req.body.mimeType || "NOT PROVIDED");
+
     const intake = await voiceIntake(req.body);
+    console.log("[test-call] voiceIntake done. issueType:", intake.issueType, "sttUsed:", intake.sttUsed);
+
     const handled = await callHandling({ sessionId: intake.sessionId });
+    console.log("[test-call] callHandling done. status:", handled.status);
+
     const summary = await finalResolutionSummary({ sessionId: intake.sessionId });
+    console.log("[test-call] summary done.");
 
     let call = null;
     if (req.body.callToNumber) {
@@ -170,6 +185,10 @@ app.post(
       });
     }
 
+    console.log("[test-call] === COMPLETE ===");
+    console.log("[test-call]   call placed:", call ? `YES (id: ${call.id})` : "NO (no callToNumber)");
+    console.log("==========================================\n");
+
     return {
       intake,
       handled,
@@ -177,6 +196,11 @@ app.post(
       call
     };
   })
+);
+
+app.get(
+  "/api/agent/call-status/:callId",
+  asyncRoute((req) => getCallStatus(req.params.callId))
 );
 
 app.post(
